@@ -1,0 +1,21 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+	  <PackageId>industREAL.CAN.CANGW</PackageId>
+	  <Version>0.0.1</Version>
+	  <Authors>industREAL</Authors>
+	  <Description>industREAL USB/Ethernet to CAN-FD Gateway package</Description>
+	  <IsPackable>true</IsPackable>
+
+	  <PackProjectReferences>true</PackProjectReferences>
+	  
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\industREAL.CAN.CORE\industREAL.CAN.CORE.csproj" />
+  </ItemGroup>
+
+</Project>
