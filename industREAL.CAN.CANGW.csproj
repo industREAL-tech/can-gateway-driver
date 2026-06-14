@@ -23,8 +23,8 @@
     <Copyright>Copyright © 2026 industREAL.tech Ltd</Copyright>
     <PackageLicenseExpression>LGPL-3.0-only</PackageLicenseExpression>
     <RepositoryType>git</RepositoryType>
-    <RepositoryUrl>https://git.industreal.tech/industreal.can/cangateway.dotnetdriver</RepositoryUrl>
-    <PackageProjectUrl>https://git.industreal.tech/industreal.can/cangateway.dotnetdriver</PackageProjectUrl>
+    <RepositoryUrl>https://github.com/industREAL-tech/can-gateway-driver</RepositoryUrl>
+    <PackageProjectUrl>https://github.com/industREAL-tech/can-gateway-driver</PackageProjectUrl>
     <PackageTags>industREAL;CAN;CAN-FD;gateway;USB;Ethernet;COBS</PackageTags>
     <DebugType>embedded</DebugType>
     <Deterministic>true</Deterministic>
