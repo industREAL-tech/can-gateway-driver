@@ -50,6 +50,11 @@ using System.Collections.Concurrent;
 using System.Diagnostics;
 using industREAL.CAN.CANGW;
 
+// Both industREAL.CAN.CANGW.Utils and industREAL.CAN.CORE declare a `Log`, so an
+// unqualified use here is CS0104. Alias to the CORE facade, which is the single
+// sink the whole stack now writes to (see Utils/iLogger.cs).
+using Log = industREAL.CAN.CORE.Log;
+
 namespace industREAL.CAN
 {
 
@@ -70,11 +75,24 @@ namespace industREAL.CAN
 
     public class CanGateway : IDisposable
     {
+        #region CONSTANTS
+        /// <summary>Serialised size of a frame record's fixed part: canId, flags,
+        /// msgUid, dataLength, canChannel. Payload follows.</summary>
+        private const int FrameHeaderLength = 14;
+
+        /// <summary>The batch count is a single byte on the wire.</summary>
+        private const int MaxFramesPerDatagram = 255;
+
+        /// <summary>One Ethernet MTU of UDP payload, pre-COBS. The gateway reads
+        /// only the first pbuf of a datagram, so a fragmented one is truncated.</summary>
+        private const int MaxDatagramPayload = 1400;
+        #endregion CONSTANTS
+
         #region LOCALS
-        //AsyncUDPBroadcastClient     client;
-        AsyncUDPClient              control;
-        ConcurrentQueue <CanFrame>  frames;
-        Watchdog                    watchdog;
+        readonly AsyncUDPClient              control;
+        readonly ConcurrentQueue <CanFrame>  frames;
+        readonly Watchdog                    watchdog;
+        bool                                 disposed;
         public bool                 isConnected { get; private set; }
         #endregion LOCALS
 
@@ -84,7 +102,7 @@ namespace industREAL.CAN
         public delegate void GatewayStatusUpdate(byte TEC_A, byte REC_A, byte TEC_B, byte REC_B);
         public delegate void ConnectionChanged(bool isConnected);
 
-        public event CanFrameReceived     FrameReceived;
+        public event CanFrameReceived?    FrameReceived;
         public event GatewayStatusUpdate? OnGatewayStatusUpdated;
         public event ConnectionChanged?   OnConnectionChanged;
         #endregion EVENTS
@@ -94,12 +112,17 @@ namespace industREAL.CAN
         {
             isConnected = false;
             frames      = new ConcurrentQueue<CanFrame>();
-            //client      = new AsyncUDPBroadcastClient(serverIp, serverPort);
+
+            // serverPort is the gateway's BROADCAST_PORT (12144 on dev_UNICAST);
+            // its receive socket is bound to BROADCAST_PORT + 1. The gateway
+            // replies to our source address and port, so this one socket carries
+            // both directions - which is why AsyncUDPBroadcastClient, which bound
+            // a fixed port to catch the old subnet broadcast, is no longer used.
             control     = new AsyncUDPClient(serverIp, serverPort+1);
             watchdog    = new(TimeSpan.FromMilliseconds(800),true);
 
-            //client.NotifyListeners += ControlNotifyListeners;//Client_NotifyListeners;
             control.NotifyListeners += Client_NotifyListeners;
+            control.OnReceiveError  += ex => Log.Error(ex, "CANGW: UDP receive failed");
             watchdog.TimedOut       += Watchdog_TimedOut;
         }
 
@@ -110,11 +133,6 @@ namespace industREAL.CAN
         #endregion CONSTUCTOR
 
         #region PRIVATE_METHODS
-        private void ControlNotifyListeners(byte[] pData)
-        {
-            throw new NotImplementedException();
-        }
-
         private void Watchdog_TimedOut()
         {
             if (isConnected)
@@ -227,13 +245,38 @@ namespace industREAL.CAN
         }
 
         #region CONTROL_FRAME_METHODS
+        /// <summary>Transmit/receive error counters from the last device-health
+        /// frame, and whether either channel has reached error-passive.</summary>
+        public byte TEC_A { get; private set; }
+        public byte REC_A { get; private set; }
+        public byte TEC_B { get; private set; }
+        public byte REC_B { get; private set; }
+        public bool ErrorPassiveA { get; private set; }
+        public bool ErrorPassiveB { get; private set; }
+
         private void HeartBeatReceived(CanFrame receivedFrame)
         {
             watchdog.Reset();
-            
-            /* Save vairables */
-            //TODO: dispatch values
-            OnGatewayStatusUpdated?.Invoke(0, 0, 0, 0);
+
+            // The firmware reports HAL_FDCAN_GetErrorCounters() values in this
+            // layout. The payload used to be discarded entirely and the event
+            // raised with (0,0,0,0), which made the bus-state features the
+            // TO-DO list asks for unimplementable.
+            var d = receivedFrame._data;
+            if (d.Length >= 4)
+            {
+                TEC_A = d[0];
+                REC_A = d[1];
+                TEC_B = d[2];
+                REC_B = d[3];
+            }
+            if (d.Length >= 6)
+            {
+                ErrorPassiveA = d[4] != 0;
+                ErrorPassiveB = d[5] != 0;
+            }
+
+            OnGatewayStatusUpdated?.Invoke(TEC_A, REC_A, TEC_B, REC_B);
         }
         #endregion CONTROL_FRAME_METHODS
 
@@ -243,15 +286,28 @@ namespace industREAL.CAN
 
         public void Connect()
         {
-            //client.Start();
+            ObjectDisposedException.ThrowIf(disposed, this);
+
             control.Start();
             watchdog.Start();
         }
 
+        /// <summary>
+        /// Stops the receiver and the watchdog. Connect() may be called again
+        /// afterwards - previously this left the UDP receive loop running, and
+        /// AsyncUDPClient could not be restarted once stopped, so a disconnect
+        /// was permanent.
+        /// </summary>
         public void Disconnect()
         {
-            //client.Stop();
             watchdog.Stop();
+            control.Stop();
+
+            if (isConnected)
+            {
+                isConnected = false;
+                OnConnectionChanged?.Invoke(isConnected);
+            }
         }
 
         public void sendSingleCanFrame(CanFrame pOutMsg)
@@ -264,7 +320,7 @@ namespace industREAL.CAN
             }
             catch (Exception e)
             {
-                Debug.WriteLine("Exception in CANGW DLL - Send single frame:" + e.Message);
+                Log.Error(e, "CANGW: send single frame failed");
             }
         }
 
@@ -273,30 +329,59 @@ namespace industREAL.CAN
             frames.Enqueue(outFrame);
         }
 
+        /// <summary>
+        /// Sends everything queued by addToMultipleFrame(), in batches the
+        /// gateway can actually accept.
+        /// </summary>
         public void FlushMultipleFrames()
         {
             try
             {
+                // Drain the queue rather than ToArray() + Clear(): those are two
+                // separate operations, so anything another thread enqueued
+                // between them used to be discarded without ever being sent.
+                var batch = new List<CanFrame>(MaxFramesPerDatagram);
+                int batchBytes = 1 + 1;         // 'm' + count
 
-                if (frames.Count > 0)
+                while (frames.TryDequeue(out var frame))
                 {
-                    byte[] outData = FrameDeserializer.SerializeMultipleWithSOF(frames.ToArray());
-                    frames.Clear();
-                    byte[] udpData = COBS.Encode(outData);
+                    int frameBytes = FrameHeaderLength + (byte)frame._dataLength;
 
-                    control.SendMessage(udpData);
-                    
+                    // Two hard limits, both of which the old code ignored:
+                    //  - the count field is a single byte, so 256 queued frames
+                    //    wrapped to 0 and the gateway transmitted nothing while
+                    //    the caller believed the batch had been flushed;
+                    //  - the gateway decodes into a fixed buffer and only reads
+                    //    the first pbuf of the datagram, so an over-MTU batch is
+                    //    truncated or rejected.
+                    if (batch.Count == MaxFramesPerDatagram ||
+                        batchBytes + frameBytes > MaxDatagramPayload)
+                    {
+                        SendBatch(batch);
+                        batch.Clear();
+                        batchBytes = 1 + 1;
+                    }
+
+                    batch.Add(frame);
+                    batchBytes += frameBytes;
                 }
-                else
+
+                if (batch.Count > 0)
                 {
-                    ; /* Out FIFO empty! */
+                    SendBatch(batch);
                 }
-            }catch(Exception e)
+            }
+            catch (Exception e)
             {
-                Debug.WriteLine("Exception in CANGW DLL - Flush Frames:" + e.Message);
+                Log.Error(e, "CANGW: flush frames failed");
             }
         }
 
+        private void SendBatch(List<CanFrame> batch)
+        {
+            byte[] outData = FrameDeserializer.SerializeMultipleWithSOF(batch.ToArray());
+            control.SendMessage(COBS.Encode(outData));
+        }
 
         public void ConfigurePort(int port)
         {
@@ -305,7 +390,24 @@ namespace industREAL.CAN
 
         public void Dispose()
         {
-            throw new NotImplementedException();
+            if (disposed)
+                return;
+
+            disposed = true;
+
+            // Release-note <0.3.1> claims "Proper Disposing with IDisposable",
+            // but this used to throw NotImplementedException, so any `using` or
+            // container-managed lifetime crashed at scope exit.
+            try { watchdog.Stop(); } catch (Exception e) { Log.Warn("CANGW: watchdog stop failed: " + e.Message); }
+
+            watchdog.TimedOut -= Watchdog_TimedOut;
+            control.NotifyListeners -= Client_NotifyListeners;
+
+            watchdog.Dispose();
+            control.Dispose();
+
+            isConnected = false;
+            GC.SuppressFinalize(this);
         }
         #endregion PUBLIC_METHODS
 

@@ -8,7 +8,7 @@ public sealed class Watchdog : IDisposable
     private readonly System.Timers.Timer _timer;
     private bool _enabled;
 
-    public event Action TimedOut;
+    public event Action? TimedOut;
 
     /// <param name="timeout">Timeout interval</param>
     /// <param name="repeatUntilReset">If true, keep firing every timeout until Reset() is called</param>
@@ -48,9 +48,9 @@ public sealed class Watchdog : IDisposable
         }
     }
 
-    private void OnElapsed(object sender, ElapsedEventArgs e)
+    private void OnElapsed(object? sender, ElapsedEventArgs e)
     {
-        Action h = null;
+        Action? h = null;
         lock (_sync)
         {
             if (!_enabled) return;
