@@ -1,2 +1,6 @@
 bin/
 obj/
+
+# Test run artifacts
+TestResults/
+*.trx
