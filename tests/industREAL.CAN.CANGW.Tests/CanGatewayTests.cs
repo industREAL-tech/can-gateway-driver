@@ -183,6 +183,31 @@ public class CanGatewayTests
         Assert.Equal(tec, gw.TEC_A);
         Assert.Equal(2, gw.REC_A);
         Assert.False(gw.ErrorPassiveA);
+        Assert.True(gw.ErrorPassiveB);
+    }
+
+    [Fact]
+    public void BusSupervisionCountersAreDecodedFromThe12ByteHealthFrame()
+    {
+        // The firmware reports bus-off recoveries and aborted-stalled-transmit
+        // counts in bytes 6..10. Without these, a recovered bus-off or a frame
+        // that never reached the bus is invisible from the host.
+        using var fake = new FakeGateway(TimeSpan.FromMilliseconds(80));
+        using var gw = new CanGateway(Host, fake.BasePort);
+
+        int updates = 0;
+        gw.OnGatewayStatusUpdated += (_, _, _, _) => Interlocked.Increment(ref updates);
+
+        gw.Connect();
+        gw.sendSingleCanFrame(Frame(0x1));
+        Assert.True(WaitFor(() => Volatile.Read(ref updates) >= 2), "no heartbeats decoded");
+
+        Assert.Equal(7,  gw.BusOffRecoveriesA);
+        Assert.Equal(8,  gw.BusOffRecoveriesB);
+        Assert.Equal(9,  gw.TxAbortsA);
+        Assert.Equal(10, gw.TxAbortsB);
+        Assert.False(gw.BusOffA);
+        Assert.True(gw.BusOffB);      // bit 1 set in byte 10
     }
 
     [Fact]

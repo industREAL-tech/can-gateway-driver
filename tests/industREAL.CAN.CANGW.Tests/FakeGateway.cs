@@ -109,9 +109,13 @@ internal sealed class FakeGateway : IDisposable
             record.AddRange(BitConverter.GetBytes((uint)0));
             record.AddRange(BitConverter.GetBytes(FlagControl));
             record.AddRange(BitConverter.GetBytes((uint)'1'));
-            record.Add(8);
+            // 12-byte health frame, matching firmware with bus supervision:
+            // TEC_A REC_A TEC_B REC_B passiveA passiveB
+            // busoffRecoveredA busoffRecoveredB txAbortsA txAbortsB busoffNow rsvd
+            record.Add(12);
             record.Add(0);
-            record.AddRange(new byte[] { _counter, 2, 3, 4, 0, 0, 0, 0 });
+            record.AddRange(new byte[] { _counter, 2, 3, 4, 0, 1,
+                                         7, 8, 9, 10, 0x02, 0 });
 
             var datagram = new List<byte> { SofUplink };
             datagram.AddRange(record);

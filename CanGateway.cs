@@ -254,6 +254,28 @@ namespace industREAL.CAN
         public bool ErrorPassiveA { get; private set; }
         public bool ErrorPassiveB { get; private set; }
 
+        /// <summary>
+        /// Bus supervision counters, present on firmware that reports a 12-byte
+        /// device-health frame. Zero on older firmware.
+        /// </summary>
+        /// <remarks>
+        /// BusOffRecoveries counts how many times the gateway had to clear a
+        /// bus-off condition on that channel and rejoin - without the firmware's
+        /// recovery the channel would have stayed dead until power cycle.
+        /// TxAborts counts transmissions cancelled because they were pending long
+        /// enough to prove nothing would ever acknowledge them; each one is a
+        /// frame that did NOT reach the bus, and a non-zero value means that
+        /// channel has no working partner or a badly degraded bus.
+        /// </remarks>
+        public byte BusOffRecoveriesA { get; private set; }
+        public byte BusOffRecoveriesB { get; private set; }
+        public byte TxAbortsA { get; private set; }
+        public byte TxAbortsB { get; private set; }
+
+        /// <summary>Whether the channel is in bus-off right now.</summary>
+        public bool BusOffA { get; private set; }
+        public bool BusOffB { get; private set; }
+
         private void HeartBeatReceived(CanFrame receivedFrame)
         {
             watchdog.Reset();
@@ -274,6 +296,18 @@ namespace industREAL.CAN
             {
                 ErrorPassiveA = d[4] != 0;
                 ErrorPassiveB = d[5] != 0;
+            }
+
+            // Bytes 6..10 were added with firmware bus supervision. Length-guarded
+            // so an older gateway that still sends 8 bytes keeps working.
+            if (d.Length >= 11)
+            {
+                BusOffRecoveriesA = d[6];
+                BusOffRecoveriesB = d[7];
+                TxAbortsA         = d[8];
+                TxAbortsB         = d[9];
+                BusOffA           = (d[10] & 0x01) != 0;
+                BusOffB           = (d[10] & 0x02) != 0;
             }
 
             OnGatewayStatusUpdated?.Invoke(TEC_A, REC_A, TEC_B, REC_B);
