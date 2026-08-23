@@ -5,17 +5,32 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
 	  <PackageId>industREAL.CAN.CANGW</PackageId>
-	  <Version>0.0.1</Version>
+	  <Version>0.2.0</Version>
 	  <Authors>industREAL</Authors>
-	  <Description>industREAL USB/Ethernet to CAN-FD Gateway package</Description>
+	  <Description>Driver for the industREAL Gen1 USB/Ethernet to CAN-FD gateway. Wire protocol v2 (UDP, COBS-framed) plus the original v1 gateway API.</Description>
 	  <IsPackable>true</IsPackable>
 
 	  <PackProjectReferences>true</PackProjectReferences>
-	  
+
   </PropertyGroup>
 
+  <!-- The test project lives in tests/, inside this project's directory, so the
+       SDK's default **/*.cs glob would otherwise compile the tests into the
+       shipping assembly — and its top-level Program alongside the real one. -->
   <ItemGroup>
-    <ProjectReference Include="..\industREAL.CAN.CORE\industREAL.CAN.CORE.csproj" />
+    <Compile Remove="tests/**" />
+    <None Remove="tests/**" />
+  </ItemGroup>
+
+  <!-- industREAL.CAN.CORE sits beside this project, but the directory is named
+       differently in the public mirror than in the internal umbrella checkout.
+       Probing for both keeps one csproj working in both layouts instead of
+       leaving the file permanently modified in whichever one it does not match. -->
+  <ItemGroup>
+    <ProjectReference Include="..\industREAL.CAN.CORE\industREAL.CAN.CORE.csproj"
+                      Condition="Exists('$(MSBuildThisFileDirectory)..\industREAL.CAN.CORE\industREAL.CAN.CORE.csproj')" />
+    <ProjectReference Include="..\core\industREAL.CAN.CORE.csproj"
+                      Condition="!Exists('$(MSBuildThisFileDirectory)..\industREAL.CAN.CORE\industREAL.CAN.CORE.csproj') And Exists('$(MSBuildThisFileDirectory)..\core\industREAL.CAN.CORE.csproj')" />
   </ItemGroup>
 
   <PropertyGroup>
@@ -26,10 +41,15 @@
     <RepositoryUrl>https://github.com/industREAL-tech/can-gateway-driver</RepositoryUrl>
     <PackageProjectUrl>https://github.com/industREAL-tech/can-gateway-driver</PackageProjectUrl>
     <PackageTags>industREAL;CAN;CAN-FD;gateway;USB;Ethernet;COBS</PackageTags>
+    <PackageReadmeFile>README.md</PackageReadmeFile>
     <DebugType>embedded</DebugType>
     <Deterministic>true</Deterministic>
     <EmbedUntrackedSources>true</EmbedUntrackedSources>
     <PublishRepositoryUrl>true</PublishRepositoryUrl>
   </PropertyGroup>
+
+  <ItemGroup>
+    <None Include="README.md" Pack="true" PackagePath="\" />
+  </ItemGroup>
 
 </Project>

@@ -152,7 +152,7 @@ namespace industREAL.CAN
                         List<CanFrame> frames = FrameDeserializer.DeserializeFrameBuffer(receivedData);
                         foreach (var frame in frames)
                         {
-                            if (frame._flags == CanFlags.CONTROL)
+                            if ((frame._flags & CanFlags.Control) != 0)
                             {
                                 switch ((GwCommands)(frame._frameID & 0xFF))
                                 {
